@@ -93,6 +93,28 @@ scripts/ansible-playbook playbooks/verify.yml
 `scripts/run-site` decrypts the external SOPS document directly into a temporary
 Ansible variables file. It does not write plaintext into the repository.
 
+## Phase 3 disposable Docker proof
+
+The Docker-host role is separate from the common baseline and refuses LXC use
+unless the private inventory explicitly opts in. It does not add any user to
+the root-equivalent `docker` group by default.
+
+Enable `docker_host_enabled` and, only for an approved disposable LXC,
+`docker_host_allow_lxc` in the private inventory. Then run:
+
+```sh
+scripts/run-phase3
+scripts/verify-phase3-idempotence
+```
+
+The proof deploys the versioned service under `services/healthcheck`. Its HTTP
+port binds only to guest loopback, it has no secrets or persistent data, and
+the verification playbook checks its health and container security settings.
+The common firewall reload replaces only its own `inet homelab` table so it
+does not erase Docker-managed networking tables. Publishing a production
+container port still requires a separately reviewed Docker firewall policy;
+the disposable proof does not authorize LAN-facing ports.
+
 ## Disposable guest lifecycle
 
 The guarded lifecycle helper reads its definition from the private directory:
@@ -115,6 +137,9 @@ tag, and description to match before it proceeds.
 - Host-key verification remains strict.
 - Production adoption requires an explicit target, backup, rollback plan, and
   health checks.
+
+Credential loss and compromise procedures are documented in
+[`docs/recovery-and-revocation.md`](docs/recovery-and-revocation.md).
 
 Keep completed environment evidence in the private validation record. The
 public [validation checklist](VALIDATION.md) describes the required proof

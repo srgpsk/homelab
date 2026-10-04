@@ -60,7 +60,7 @@ for script_file in scripts/*; do
   sh -n "$script_file"
 done
 ansible-inventory -i "$repo_dir/inventory/hosts.yml" -i "$private_inventory" --graph >/dev/null
-scripts/ansible-playbook --syntax-check playbooks/bootstrap.yml >/dev/null
-scripts/ansible-playbook --syntax-check playbooks/site.yml >/dev/null
-scripts/ansible-playbook --syntax-check playbooks/verify.yml >/dev/null
+for playbook_file in playbooks/*.yml; do
+  scripts/ansible-playbook --syntax-check "$playbook_file" >/dev/null
+done
 echo 'controller verification passed'

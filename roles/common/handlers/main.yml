@@ -4,10 +4,19 @@
     name: ssh
     state: restarted
 
-- name: Reload nftables
-  ansible.builtin.service:
-    name: nftables
-    state: reloaded
+- name: Remove the previous managed nftables table
+  ansible.builtin.command: nft delete table inet homelab
+  register: common_nft_delete
+  changed_when: common_nft_delete.rc == 0
+  failed_when:
+    - common_nft_delete.rc != 0
+    - "'No such file or directory' not in common_nft_delete.stderr"
+  listen: Reload nftables
+
+- name: Load the managed nftables table
+  ansible.builtin.command: nft --file /etc/nftables.conf
+  changed_when: true
+  listen: Reload nftables
 
 - name: Restart Alloy
   ansible.builtin.service:

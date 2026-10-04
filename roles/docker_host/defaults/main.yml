@@ -1,0 +1,29 @@
+---
+docker_host_enabled: false
+docker_host_allow_lxc: false
+docker_host_allow_remove_conflicting_packages: false
+docker_host_users: []
+docker_host_repository_url: https://download.docker.com/linux/debian
+docker_host_repository_key_url: https://download.docker.com/linux/debian/gpg
+docker_host_packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+docker_host_conflicting_packages:
+  - containerd
+  - docker-buildx
+  - docker-compose
+  - docker-doc
+  - docker.io
+  - podman-docker
+  - runc
+docker_host_architecture_map:
+  x86_64: amd64
+  aarch64: arm64
+  armv7l: armhf
+  ppc64le: ppc64el
+docker_host_daemon_config:
+  live-restore: true
+  log-driver: local

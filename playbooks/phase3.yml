@@ -1,0 +1,85 @@
+---
+- name: Prove the Docker-host foundation on the disposable guest
+  hosts: test_guests
+  gather_facts: true
+  become: true
+  vars:
+    phase3_healthcheck_dir: /opt/homelab/healthcheck
+  roles:
+    - common
+    - role: docker_host
+      when: docker_host_enabled | bool
+  tasks:
+    - name: Require explicit Phase 3 enablement
+      ansible.builtin.assert:
+        that:
+          - docker_host_enabled | bool
+        fail_msg: Enable docker_host only in the private disposable-guest inventory.
+
+    - name: Create the health-check service directory
+      ansible.builtin.file:
+        path: "{{ phase3_healthcheck_dir }}"
+        state: directory
+        owner: root
+        group: root
+        mode: '0755'
+
+    - name: Install the health-check Compose definition
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../services/healthcheck/compose.yml"
+        dest: "{{ phase3_healthcheck_dir }}/compose.yml"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Install the health-check web configuration
+      ansible.builtin.copy:
+        src: "{{ playbook_dir }}/../services/healthcheck/nginx.conf"
+        dest: "{{ phase3_healthcheck_dir }}/nginx.conf"
+        owner: root
+        group: root
+        mode: '0644'
+
+    - name: Validate the Compose definition
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --file
+          - "{{ phase3_healthcheck_dir }}/compose.yml"
+          - config
+          - --quiet
+      changed_when: false
+
+    - name: Converge the disposable web workload
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --ansi
+          - never
+          - --file
+          - "{{ phase3_healthcheck_dir }}/compose.yml"
+          - up
+          - --detach
+          - --pull
+          - missing
+          - --wait
+          - --wait-timeout
+          - '60'
+      args:
+        chdir: "{{ phase3_healthcheck_dir }}"
+      register: phase3_compose_up
+      changed_when: >-
+        'Created' in (phase3_compose_up.stdout + phase3_compose_up.stderr) or
+        'Recreated' in (phase3_compose_up.stdout + phase3_compose_up.stderr) or
+        'Started' in (phase3_compose_up.stdout + phase3_compose_up.stderr) or
+        'Pulled' in (phase3_compose_up.stdout + phase3_compose_up.stderr)
+
+    - name: Require the local web health contract
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18080/health
+        return_content: true
+        status_code: 200
+      register: phase3_health
+      failed_when: phase3_health.status != 200 or phase3_health.content | trim != 'ok'

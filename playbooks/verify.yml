@@ -4,6 +4,18 @@
   gather_facts: true
   become: true
   tasks:
+    - name: Require an operational system state
+      ansible.builtin.command: systemctl is-system-running
+      register: system_running_state
+      changed_when: false
+      failed_when: system_running_state.stdout | trim != 'running'
+
+    - name: Require no failed systemd units
+      ansible.builtin.command: systemctl --failed --no-legend --plain
+      register: failed_systemd_units
+      changed_when: false
+      failed_when: failed_systemd_units.stdout | trim | length > 0
+
     - name: Read effective SSH policy
       ansible.builtin.command: sshd -T
       register: sshd_effective

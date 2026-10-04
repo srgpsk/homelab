@@ -1,0 +1,126 @@
+---
+- name: Require an explicitly enabled supported Docker host
+  ansible.builtin.assert:
+    that:
+      - docker_host_enabled | bool
+      - ansible_facts.os_family == 'Debian'
+      - ansible_facts.distribution == 'Debian'
+      - ansible_facts.distribution_major_version in ['12', '13']
+      - docker_host_architecture_map.get(ansible_facts.architecture, '') | length > 0
+      - ansible_facts.virtualization_type != 'lxc' or docker_host_allow_lxc | bool
+    fail_msg: >-
+      Docker installation requires explicit enablement, supported Debian and
+      architecture values, and a separate opt-in for LXC guests.
+
+- name: Collect installed package facts
+  ansible.builtin.package_facts:
+    manager: auto
+
+- name: Identify conflicting Docker packages
+  ansible.builtin.set_fact:
+    docker_host_installed_conflicts: >-
+      {{ docker_host_conflicting_packages
+         | intersect(ansible_facts.packages.keys() | list) }}
+
+- name: Refuse to replace an existing container runtime implicitly
+  ansible.builtin.assert:
+    that:
+      - docker_host_installed_conflicts | length == 0 or docker_host_allow_remove_conflicting_packages | bool
+    fail_msg: >-
+      Conflicting packages are installed: {{ docker_host_installed_conflicts | join(', ') }}.
+      Inspect the host and explicitly allow their removal before continuing.
+
+- name: Remove explicitly approved conflicting packages
+  ansible.builtin.apt:
+    name: "{{ docker_host_installed_conflicts }}"
+    state: absent
+  when:
+    - docker_host_allow_remove_conflicting_packages | bool
+    - docker_host_installed_conflicts | length > 0
+
+- name: Install Docker repository prerequisites
+  ansible.builtin.apt:
+    name:
+      - ca-certificates
+      - curl
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Create the APT keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Install the Docker repository signing key
+  ansible.builtin.get_url:
+    url: "{{ docker_host_repository_key_url }}"
+    dest: /etc/apt/keyrings/docker.asc
+    owner: root
+    group: root
+    mode: '0644'
+  register: docker_host_repository_key
+
+- name: Configure the Docker APT repository
+  ansible.builtin.template:
+    src: docker.sources.j2
+    dest: /etc/apt/sources.list.d/docker.sources
+    owner: root
+    group: root
+    mode: '0644'
+  register: docker_host_repository
+
+- name: Refresh package metadata after Docker repository changes
+  ansible.builtin.apt:
+    update_cache: true
+  when: docker_host_repository_key.changed or docker_host_repository.changed
+
+- name: Install Docker Engine and Compose
+  ansible.builtin.apt:
+    name: "{{ docker_host_packages }}"
+    state: present
+
+- name: Create the Docker configuration directory
+  ansible.builtin.file:
+    path: /etc/docker
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Configure the Docker daemon
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: '0644'
+    validate: /usr/bin/dockerd --validate --config-file=%s
+  notify: Restart Docker
+
+- name: Grant explicitly approved users Docker socket access
+  ansible.builtin.user:
+    name: "{{ item }}"
+    groups: docker
+    append: true
+  loop: "{{ docker_host_users }}"
+  when: docker_host_users | length > 0
+
+- name: Enable Docker and containerd
+  ansible.builtin.service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop:
+    - containerd
+    - docker
+
+- name: Apply pending Docker configuration changes
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify the Docker daemon responds
+  ansible.builtin.command: docker info
+  changed_when: false

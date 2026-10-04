@@ -1,0 +1,86 @@
+---
+- name: Verify the disposable Docker and web workload without changing it
+  hosts: test_guests
+  gather_facts: false
+  become: true
+  vars:
+    phase3_healthcheck_dir: /opt/homelab/healthcheck
+    phase3_healthcheck_image: nginx:alpine@sha256:df221db836e1754089190208cee7eeda94f233197056426eda74a43ab1abeac2
+  tasks:
+    - name: Verify Docker and containerd are active
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      changed_when: false
+      loop:
+        - containerd
+        - docker
+
+    - name: Validate the deployed Compose definition
+      ansible.builtin.command:
+        argv:
+          - docker
+          - compose
+          - --file
+          - "{{ phase3_healthcheck_dir }}/compose.yml"
+          - config
+          - --quiet
+      changed_when: false
+
+    - name: Read the managed Docker daemon configuration
+      ansible.builtin.slurp:
+        src: /etc/docker/daemon.json
+      register: phase3_daemon_json
+
+    - name: Record the Docker daemon configuration
+      ansible.builtin.set_fact:
+        phase3_daemon_config: "{{ phase3_daemon_json.content | b64decode | from_json }}"
+
+    - name: Require bounded daemon defaults
+      ansible.builtin.assert:
+        that:
+          - phase3_daemon_config['log-driver'] == 'local'
+          - phase3_daemon_config['live-restore']
+
+    - name: Read the administrative account groups
+      ansible.builtin.command: "id -nG {{ common_admin_user }}"
+      register: phase3_admin_groups
+      changed_when: false
+
+    - name: Require no ambient Docker socket access
+      ansible.builtin.assert:
+        that:
+          - "'docker' not in phase3_admin_groups.stdout.split()"
+
+    - name: Inspect the health-check container
+      ansible.builtin.command:
+        argv:
+          - docker
+          - inspect
+          - homelab-healthcheck
+      register: phase3_container_inspect
+      changed_when: false
+
+    - name: Record the inspected container state
+      ansible.builtin.set_fact:
+        phase3_container: "{{ (phase3_container_inspect.stdout | from_json) | first }}"
+
+    - name: Require the intended container security and health state
+      ansible.builtin.assert:
+        that:
+          - phase3_container.State.Running
+          - phase3_container.State.Health.Status == 'healthy'
+          - phase3_container.Config.Image == phase3_healthcheck_image
+          - phase3_container.Config.User == '101:101'
+          - phase3_container.HostConfig.ReadonlyRootfs
+          - phase3_container.HostConfig.RestartPolicy.Name == 'unless-stopped'
+          - "'ALL' in phase3_container.HostConfig.CapDrop"
+          - "'no-new-privileges:true' in phase3_container.HostConfig.SecurityOpt"
+          - phase3_container.HostConfig.PortBindings['8080/tcp'][0].HostIp == '127.0.0.1'
+          - phase3_container.HostConfig.PortBindings['8080/tcp'][0].HostPort == '18080'
+
+    - name: Require the local web health contract
+      ansible.builtin.uri:
+        url: http://127.0.0.1:18080/health
+        return_content: true
+        status_code: 200
+      register: phase3_health
+      failed_when: phase3_health.status != 200 or phase3_health.content | trim != 'ok'

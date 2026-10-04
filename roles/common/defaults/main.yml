@@ -15,6 +15,7 @@ common_ssh_port: 22
 common_ssh_hardening_enabled: false
 common_ssh_key_access_verified: false
 common_firewall_enabled: false
+common_lxc_nfs_client_enabled: true
 common_alloy_enabled: false
 common_alloy_collect_journal: false
 alloy_prometheus_url: ""

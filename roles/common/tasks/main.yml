@@ -50,6 +50,34 @@
     purge: true
   when: ansible_facts.virtualization_type == 'lxc'
 
+- name: Remove the explicitly disabled NFS client from LXC containers
+  ansible.builtin.apt:
+    name:
+      - nfs-common
+      - rpcbind
+    state: absent
+    purge: true
+  register: common_lxc_nfs_client_removal
+  when:
+    - ansible_facts.virtualization_type == 'lxc'
+    - not common_lxc_nfs_client_enabled | bool
+
+- name: Reload systemd after removing the LXC NFS client
+  ansible.builtin.systemd_service:
+    daemon_reload: true
+  when:
+    - common_lxc_nfs_client_removal is not skipped
+    - common_lxc_nfs_client_removal.changed
+
+- name: Clear the obsolete RPC pipe filesystem failure
+  ansible.builtin.command: systemctl reset-failed run-rpc_pipefs.mount
+  register: common_rpc_pipefs_reset
+  changed_when: common_rpc_pipefs_reset.rc == 0
+  failed_when: common_rpc_pipefs_reset.rc not in [0, 5]
+  when:
+    - common_lxc_nfs_client_removal is not skipped
+    - common_lxc_nfs_client_removal.changed
+
 - name: Read the configured timezone
   ansible.builtin.command: timedatectl show --property=Timezone --value
   register: configured_timezone

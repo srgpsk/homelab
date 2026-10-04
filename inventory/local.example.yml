@@ -11,7 +11,10 @@ all:
     common_ssh_hardening_enabled: false
     common_ssh_key_access_verified: false
     common_firewall_enabled: false
+    common_lxc_nfs_client_enabled: true
     common_alloy_enabled: false
+    docker_host_enabled: false
+    docker_host_allow_lxc: false
   children:
     proxmox_nodes:
       hosts:
