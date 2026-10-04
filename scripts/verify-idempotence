@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$repo_dir/scripts/_controller-env"
+output_file=$(mktemp "$state_dir/idempotence.XXXXXX")
+trap 'rm -f "$output_file"' EXIT HUP INT TERM
+
+cd "$repo_dir"
+scripts/run-site
+scripts/run-site | tee "$output_file"
+
+if ! awk '/^disposable-debian[[:space:]]*:/ { for (i=1; i<=NF; i++) if ($i ~ /^changed=0$/) ok=1 } END { exit !ok }' "$output_file"; then
+  echo 'Second convergence run was not clean.' >&2
+  exit 1
+fi
+
+echo 'idempotence verification passed'

@@ -1,0 +1,66 @@
+#!/bin/sh
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$repo_dir/scripts/_controller-env"
+ssh_pub=${ssh_key}.pub
+
+require_file() {
+  if [ ! -f "$1" ]; then
+    echo "Required file is missing: $1" >&2
+    exit 1
+  fi
+}
+
+require_mode() {
+  actual_mode=$(stat -c %a "$1")
+  if [ "$actual_mode" != "$2" ]; then
+    echo "Wrong mode for $1: expected $2, got $actual_mode" >&2
+    exit 1
+  fi
+}
+
+for command_name in git ansible-playbook ansible-inventory sops age ssh ssh-keygen; do
+  command -v "$command_name" >/dev/null
+done
+
+require_file "$ssh_key"
+require_file "$ssh_pub"
+require_mode "$ssh_key" 600
+require_mode "$ssh_pub" 644
+test -d "$state_dir" || { echo "State directory is missing: $state_dir" >&2; exit 1; }
+require_mode "$state_dir" 700
+require_file "$state_dir/age-identity.txt"
+require_mode "$state_dir/age-identity.txt" 600
+require_file "$state_dir/known_hosts"
+test -s "$state_dir/known_hosts" || { echo "Known-hosts file is empty: $state_dir/known_hosts" >&2; exit 1; }
+require_file "$private_inventory"
+require_mode "$private_inventory" 600
+require_file "$proxmox_env"
+require_mode "$proxmox_env" 600
+require_file "$grafana_secret"
+require_mode "$grafana_secret" 600
+require_file "$sops_config"
+require_mode "$sops_config" 600
+
+if rg -n --hidden --glob '!.git/**' --glob '!scripts/verify-controller' \
+  '(BEGIN (OPENSSH|RSA|EC) PRIVATE KEY|AGE-SECRET-KEY-)' "$repo_dir"; then
+  echo 'Potential plaintext secret detected.' >&2
+  exit 1
+fi
+
+if ! SOPS_AGE_KEY_FILE=$age_identity sops filestatus "$grafana_secret" | rg -q '"encrypted":[[:space:]]*true'; then
+  echo "SOPS document is not encrypted: $grafana_secret" >&2
+  exit 1
+fi
+
+cd "$repo_dir"
+for script_file in scripts/*; do
+  [ -f "$script_file" ] || continue
+  sh -n "$script_file"
+done
+ansible-inventory -i "$repo_dir/inventory/hosts.yml" -i "$private_inventory" --graph >/dev/null
+scripts/ansible-playbook --syntax-check playbooks/bootstrap.yml >/dev/null
+scripts/ansible-playbook --syntax-check playbooks/site.yml >/dev/null
+scripts/ansible-playbook --syntax-check playbooks/verify.yml >/dev/null
+echo 'controller verification passed'

@@ -1,0 +1,12 @@
+---
+# Non-secret shared policy. Host/environment choices remain in ignored local inventory.
+common_base_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - nftables
+  - python3
+  - sudo
+  - vim-tiny
+common_ssh_port: 22
+common_alloy_collect_journal: false

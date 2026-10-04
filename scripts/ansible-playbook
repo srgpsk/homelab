@@ -1,0 +1,24 @@
+#!/bin/sh
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$repo_dir/scripts/_controller-env"
+
+if [ ! -f "$private_inventory" ]; then
+  echo "Private inventory is missing: $private_inventory" >&2
+  exit 1
+fi
+if [ ! -f "$ssh_key" ]; then
+  echo "SSH identity is missing: $ssh_key" >&2
+  exit 1
+fi
+if [ ! -f "$known_hosts" ]; then
+  echo "Known-hosts file is missing: $known_hosts" >&2
+  exit 1
+fi
+
+ANSIBLE_SSH_ARGS="-o IdentitiesOnly=yes -o IdentityFile=$ssh_key -o UserKnownHostsFile=$known_hosts -o StrictHostKeyChecking=yes -o ControlMaster=auto -o ControlPersist=60s"
+export ANSIBLE_SSH_ARGS
+
+cd "$repo_dir"
+exec ansible-playbook -i "$repo_dir/inventory/hosts.yml" -i "$private_inventory" "$@"

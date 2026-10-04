@@ -1,0 +1,7 @@
+# Managed by Ansible. The safe bootstrap pass leaves fallback access unchanged.
+{% if common_ssh_hardening_enabled | bool %}
+PermitRootLogin no
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PubkeyAuthentication yes
+{% endif %}

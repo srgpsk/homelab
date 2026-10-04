@@ -1,0 +1,4 @@
+creation_rules:
+  - path_regex: .*\.sops\.ya?ml$
+    age: REPLACE_WITH_AGE_RECIPIENT
+    encrypted_regex: '^(.*(password|token)|.*secret.*)$'

@@ -1,0 +1,7 @@
+---
+- name: Converge the disposable Debian guest
+  hosts: test_guests
+  gather_facts: true
+  become: true
+  roles:
+    - common

@@ -1,0 +1,25 @@
+---
+# Store a completed copy outside this repository at
+# $HOMELAB_PRIVATE_DIR/inventory/hosts.yml.
+all:
+  vars:
+    common_admin_user: REPLACE_WITH_CONFIRMED_AUTOMATION_ACCOUNT
+    common_admin_public_key_file: /absolute/path/to/dedicated/id_ed25519.pub
+    common_timezone: UTC
+    common_management_cidrs:
+      - REPLACE_WITH_CONFIRMED_MANAGEMENT_CIDR
+    common_ssh_hardening_enabled: false
+    common_ssh_key_access_verified: false
+    common_firewall_enabled: false
+    common_alloy_enabled: false
+  children:
+    proxmox_nodes:
+      hosts:
+        test-proxmox:
+          ansible_host: REPLACE_WITH_PROXMOX_HOST_OR_IP
+          ansible_user: REPLACE_WITH_PROXMOX_AUTOMATION_ACCOUNT
+    test_guests:
+      hosts:
+        disposable-debian:
+          ansible_host: REPLACE_WITH_DISPOSABLE_GUEST_IP
+          ansible_user: root

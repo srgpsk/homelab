@@ -1,0 +1,25 @@
+---
+common_admin_user: ""
+common_admin_public_key_file: ""
+common_admin_sudo_rule: "ALL=(ALL:ALL) NOPASSWD: ALL"
+common_timezone: UTC
+common_base_packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - nftables
+  - python3
+  - sudo
+common_management_cidrs: []
+common_ssh_port: 22
+common_ssh_hardening_enabled: false
+common_ssh_key_access_verified: false
+common_firewall_enabled: false
+common_alloy_enabled: false
+common_alloy_collect_journal: false
+alloy_prometheus_url: ""
+alloy_prometheus_username: ""
+alloy_prometheus_password: ""
+alloy_loki_url: ""
+alloy_loki_username: ""
+alloy_loki_password: ""

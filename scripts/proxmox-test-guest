@@ -1,0 +1,91 @@
+#!/bin/sh
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$repo_dir/scripts/_controller-env"
+
+if [ ! -f "$proxmox_env" ]; then
+  echo "Private Proxmox definition is missing: $proxmox_env" >&2
+  exit 1
+fi
+. "$proxmox_env"
+
+ssh_pub=${ssh_key}.pub
+remote_pub=/tmp/homelab-automation-${TEST_CTID}.pub
+
+pve() {
+  ssh -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityFile="$ssh_key" \
+    -o UserKnownHostsFile="$known_hosts" -o StrictHostKeyChecking=yes \
+    "$PVE_USER@$PVE_HOST" "$@"
+}
+
+copy_public_key() {
+  scp -q -o BatchMode=yes -o IdentitiesOnly=yes -o IdentityFile="$ssh_key" \
+    -o UserKnownHostsFile="$known_hosts" -o StrictHostKeyChecking=yes \
+    "$ssh_pub" "$PVE_USER@$PVE_HOST:$remote_pub"
+}
+
+show_status() {
+  pve sudo -n pct status "$TEST_CTID"
+  pve sudo -n pct config "$TEST_CTID"
+  if pve sudo -n pct status "$TEST_CTID" | rg -q 'status: running'; then
+    pve sudo -n pct exec "$TEST_CTID" -- ip -4 -o addr show dev eth0
+    pve sudo -n pct exec "$TEST_CTID" -- ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub
+    pve sudo -n pct exec "$TEST_CTID" -- systemctl is-system-running
+  fi
+}
+
+case ${1:-} in
+  create)
+    test "$(pve hostname -s)" = "$PVE_EXPECTED_HOSTNAME"
+    test "$(pve sudo -n pvesh get /cluster/nextid)" = "$TEST_CTID"
+    if pve sudo -n pct config "$TEST_CTID" >/dev/null 2>&1; then
+      echo "Refusing to overwrite existing CT $TEST_CTID" >&2
+      exit 1
+    fi
+    pve sudo -n pveam list local | rg -Fq "$TEST_TEMPLATE"
+    copy_public_key
+    trap 'pve sudo -n rm -f "$remote_pub" >/dev/null 2>&1 || true' EXIT HUP INT TERM
+    pve sudo -n pct create "$TEST_CTID" "$TEST_TEMPLATE" \
+      --hostname "$TEST_HOSTNAME" \
+      --description "$TEST_DESCRIPTION" \
+      --tags "$TEST_TAG" \
+      --unprivileged 1 \
+      --features nesting=1 \
+      --cores "$TEST_CORES" \
+      --memory "$TEST_MEMORY_MIB" \
+      --swap "$TEST_SWAP_MIB" \
+      --rootfs "$TEST_STORAGE:$TEST_ROOTFS_GIB" \
+      --net0 "name=eth0,bridge=$TEST_BRIDGE,firewall=1,ip=dhcp,type=veth" \
+      --ostype debian \
+      --ssh-public-keys "$remote_pub" \
+      --onboot 0 \
+      --start 1
+    pve sudo -n rm -f "$remote_pub"
+    trap - EXIT HUP INT TERM
+    for attempt in $(seq 1 20); do
+      state=$(pve sudo -n pct exec "$TEST_CTID" -- systemctl is-system-running 2>/dev/null || true)
+      [ "$state" = running ] && break
+      sleep 2
+    done
+    show_status
+    ;;
+  destroy)
+    config=$(pve sudo -n pct config "$TEST_CTID")
+    printf '%s\n' "$config" | rg -qx "hostname: $TEST_HOSTNAME"
+    printf '%s\n' "$config" | rg -qx "tags: $TEST_TAG"
+    printf '%s\n' "$config" | rg -q "^description: $TEST_DESCRIPTION"
+    if pve sudo -n pct status "$TEST_CTID" | rg -q 'status: running'; then
+      pve sudo -n pct stop "$TEST_CTID"
+    fi
+    pve sudo -n pct destroy "$TEST_CTID" --purge 1 --destroy-unreferenced-disks 1
+    echo "Destroyed guarded disposable CT $TEST_CTID"
+    ;;
+  status)
+    show_status
+    ;;
+  *)
+    echo 'Usage: proxmox-test-guest create|status|destroy' >&2
+    exit 2
+    ;;
+esac

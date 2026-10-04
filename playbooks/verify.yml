@@ -1,0 +1,59 @@
+---
+- name: Verify the disposable Debian baseline without changing it
+  hosts: test_guests
+  gather_facts: true
+  become: true
+  tasks:
+    - name: Read effective SSH policy
+      ansible.builtin.command: sshd -T
+      register: sshd_effective
+      changed_when: false
+
+    - name: Require hardened SSH policy
+      ansible.builtin.assert:
+        that:
+          - "'permitrootlogin no' in sshd_effective.stdout"
+          - "'passwordauthentication no' in sshd_effective.stdout"
+        fail_msg: Effective SSH policy is not hardened.
+
+    - name: Verify the administrative account exists
+      ansible.builtin.command: "id {{ common_admin_user }}"
+      changed_when: false
+
+    - name: Verify non-interactive sudo for the administrative account
+      ansible.builtin.command:
+        argv:
+          - runuser
+          - -u
+          - "{{ common_admin_user }}"
+          - --
+          - sudo
+          - -n
+          - /usr/bin/true
+      changed_when: false
+
+    - name: Read time synchronization state
+      ansible.builtin.command: timedatectl show --property=Timezone --property=NTPSynchronized
+      register: time_state
+      changed_when: false
+
+    - name: Require configured timezone and synchronized clock
+      ansible.builtin.assert:
+        that:
+          - "('Timezone=' + common_timezone) in time_state.stdout"
+          - "'NTPSynchronized=yes' in time_state.stdout"
+
+    - name: Verify required services are active
+      ansible.builtin.command: "systemctl is-active {{ item }}"
+      changed_when: false
+      loop: "{{ (['chrony'] if ansible_facts.virtualization_type != 'lxc' else []) + ['nftables'] + (['alloy'] if common_alloy_enabled else []) }}"
+
+    - name: Verify the managed firewall ruleset is loaded
+      ansible.builtin.command: nft list table inet homelab
+      changed_when: false
+
+    - name: Verify Alloy configuration syntax
+      ansible.builtin.command: alloy validate /etc/alloy/config.alloy
+      changed_when: false
+      no_log: true
+      when: common_alloy_enabled

@@ -1,0 +1,205 @@
+---
+- name: Require Debian for the experimental baseline
+  ansible.builtin.assert:
+    that:
+      - ansible_facts.os_family == 'Debian'
+      - common_admin_user | length > 0
+      - common_admin_user != 'root'
+      - common_admin_public_key_file | length > 0
+    fail_msg: This role requires Debian and an explicitly configured non-root automation account.
+
+- name: Require explicit proof before applying access restrictions
+  ansible.builtin.assert:
+    that:
+      - common_ssh_key_access_verified | bool
+    fail_msg: Set common_ssh_key_access_verified=true only after a separate key-based login succeeds.
+  when: common_ssh_hardening_enabled | bool
+
+- name: Require a management CIDR before enabling the firewall
+  ansible.builtin.assert:
+    that:
+      - common_management_cidrs | length > 0
+      - common_ssh_key_access_verified | bool
+    fail_msg: Firewall activation requires a confirmed management CIDR and verified key access.
+  when: common_firewall_enabled | bool
+
+- name: Require Grafana Cloud values before enabling Alloy
+  ansible.builtin.assert:
+    that:
+      - alloy_prometheus_url | string | length > 0
+      - alloy_prometheus_username | string | length > 0
+      - alloy_prometheus_password | string | length > 0
+      - not common_alloy_collect_journal or alloy_loki_url | string | length > 0
+      - not common_alloy_collect_journal or alloy_loki_username | string | length > 0
+      - not common_alloy_collect_journal or alloy_loki_password | string | length > 0
+    fail_msg: Alloy requires SOPS-supplied Grafana Cloud endpoints and credentials.
+  no_log: true
+  when: common_alloy_enabled | bool
+
+- name: Install baseline packages
+  ansible.builtin.apt:
+    name: "{{ common_base_packages + (['chrony'] if ansible_facts.virtualization_type != 'lxc' else []) }}"
+    state: present
+    update_cache: true
+    cache_valid_time: 3600
+
+- name: Remove guest-local Chrony from LXC containers
+  ansible.builtin.apt:
+    name: chrony
+    state: absent
+    purge: true
+  when: ansible_facts.virtualization_type == 'lxc'
+
+- name: Read the configured timezone
+  ansible.builtin.command: timedatectl show --property=Timezone --value
+  register: configured_timezone
+  changed_when: false
+
+- name: Set the host timezone
+  ansible.builtin.command: "timedatectl set-timezone {{ common_timezone }}"
+  changed_when: true
+  when: configured_timezone.stdout != common_timezone
+
+- name: Enable network time synchronization
+  ansible.builtin.service:
+    name: chrony
+    enabled: true
+    state: started
+  when: ansible_facts.virtualization_type != 'lxc'
+
+- name: Create the administrative account
+  ansible.builtin.user:
+    name: "{{ common_admin_user }}"
+    groups: sudo
+    append: true
+    create_home: true
+    shell: /bin/bash
+    password_lock: true
+    state: present
+
+- name: Create the administrative SSH directory
+  ansible.builtin.file:
+    path: "/home/{{ common_admin_user }}/.ssh"
+    state: directory
+    owner: "{{ common_admin_user }}"
+    group: "{{ common_admin_user }}"
+    mode: '0700'
+
+- name: Install the dedicated automation public key
+  ansible.builtin.copy:
+    src: "{{ common_admin_public_key_file }}"
+    dest: "/home/{{ common_admin_user }}/.ssh/authorized_keys"
+    owner: "{{ common_admin_user }}"
+    group: "{{ common_admin_user }}"
+    mode: '0600'
+
+- name: Configure administrative sudo access
+  ansible.builtin.copy:
+    content: "{{ common_admin_user }} {{ common_admin_sudo_rule }}\n"
+    dest: "/etc/sudoers.d/90-{{ common_admin_user }}"
+    owner: root
+    group: root
+    mode: '0440'
+    validate: /usr/sbin/visudo -cf %s
+
+- name: Install the managed SSH policy
+  ansible.builtin.template:
+    src: ssh-policy.conf.j2
+    dest: /etc/ssh/sshd_config.d/90-homelab.conf
+    owner: root
+    group: root
+    mode: '0644'
+  register: ssh_policy
+  notify: Restart SSH
+
+- name: Validate SSH configuration before handlers run
+  ansible.builtin.command: sshd -t
+  changed_when: false
+  when: ssh_policy.changed
+
+- name: Install the managed nftables policy
+  ansible.builtin.template:
+    src: nftables.conf.j2
+    dest: /etc/nftables.conf
+    owner: root
+    group: root
+    mode: '0644'
+    validate: nft -c -f %s
+  notify: Reload nftables
+  when: common_firewall_enabled | bool
+
+- name: Enable nftables after a validated policy is installed
+  ansible.builtin.service:
+    name: nftables
+    enabled: true
+    state: started
+  when: common_firewall_enabled | bool
+
+- name: Create the APT keyring directory
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+  when: common_alloy_enabled | bool
+
+- name: Install Grafana repository key
+  ansible.builtin.get_url:
+    url: https://apt.grafana.com/gpg-full.key
+    dest: /etc/apt/keyrings/grafana.asc
+    owner: root
+    group: root
+    mode: '0644'
+  register: grafana_key
+  when: common_alloy_enabled | bool
+
+- name: Configure Grafana package repository
+  ansible.builtin.copy:
+    content: "deb [signed-by=/etc/apt/keyrings/grafana.asc] https://apt.grafana.com stable main\n"
+    dest: /etc/apt/sources.list.d/grafana.list
+    owner: root
+    group: root
+    mode: '0644'
+  register: grafana_repository
+  when: common_alloy_enabled | bool
+
+- name: Refresh package metadata after Grafana repository changes
+  ansible.builtin.apt:
+    update_cache: true
+  when:
+    - common_alloy_enabled | bool
+    - grafana_key.changed or grafana_repository.changed
+
+- name: Install Grafana Alloy
+  ansible.builtin.apt:
+    name: alloy
+    state: present
+  when: common_alloy_enabled | bool
+
+- name: Configure Grafana Alloy
+  ansible.builtin.template:
+    src: config.alloy.j2
+    dest: /etc/alloy/config.alloy
+    owner: root
+    group: alloy
+    mode: '0640'
+  no_log: true
+  notify: Restart Alloy
+  when: common_alloy_enabled | bool
+
+- name: Apply restrictive Alloy configuration directory permissions
+  ansible.builtin.file:
+    path: /etc/alloy
+    state: directory
+    owner: root
+    group: alloy
+    mode: '0750'
+  when: common_alloy_enabled | bool
+
+- name: Enable Grafana Alloy
+  ansible.builtin.service:
+    name: alloy
+    enabled: true
+    state: started
+  when: common_alloy_enabled | bool

@@ -1,0 +1,22 @@
+#!/bin/sh
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+default_state_dir=$HOME/.local/state/homelab
+state_dir=${HOMELAB_STATE_DIR:-$default_state_dir}
+private_dir=${HOMELAB_PRIVATE_DIR:-$state_dir/private}
+controller_env=${HOMELAB_CONTROLLER_ENV:-$private_dir/controller.env}
+
+if [ -f "$controller_env" ]; then
+  # This local file may override any HOMELAB_* path below.
+  . "$controller_env"
+fi
+
+state_dir=${HOMELAB_STATE_DIR:-$state_dir}
+private_dir=${HOMELAB_PRIVATE_DIR:-$private_dir}
+ssh_key=${HOMELAB_SSH_KEY:-$private_dir/ssh/id_ed25519}
+known_hosts=${HOMELAB_KNOWN_HOSTS:-$state_dir/known_hosts}
+private_inventory=${HOMELAB_INVENTORY:-$private_dir/inventory/hosts.yml}
+grafana_secret=${HOMELAB_GRAFANA_SECRET:-$private_dir/secrets/grafana-cloud.sops.yml}
+age_identity=${SOPS_AGE_KEY_FILE:-$state_dir/age-identity.txt}
+sops_config=${HOMELAB_SOPS_CONFIG:-$private_dir/sops.yaml}
+proxmox_env=${HOMELAB_PROXMOX_ENV:-$private_dir/proxmox/test-guest.env}

@@ -1,0 +1,51 @@
+prometheus.exporter.unix "host" {
+  disable_collectors = {{ (['ipvs', 'btrfs', 'infiniband', 'xfs', 'zfs'] + (['diskstats'] if ansible_facts.virtualization_type == 'lxc' else [])) | to_json }}
+}
+
+discovery.relabel "integrations_node_exporter" {
+  targets = prometheus.exporter.unix.host.targets
+
+  rule {
+    target_label = "instance"
+    replacement  = constants.hostname
+  }
+
+  rule {
+    target_label = "job"
+    replacement  = "integrations/node_exporter"
+  }
+}
+
+prometheus.scrape "host" {
+  targets    = discovery.relabel.integrations_node_exporter.output
+  forward_to = [prometheus.remote_write.grafana_cloud.receiver]
+}
+
+prometheus.remote_write "grafana_cloud" {
+  endpoint {
+    url = {{ alloy_prometheus_url | string | to_json }}
+    basic_auth {
+      username = {{ alloy_prometheus_username | string | to_json }}
+      password = {{ alloy_prometheus_password | string | to_json }}
+    }
+  }
+}
+
+{% if common_alloy_collect_journal | bool %}
+loki.source.journal "system" {
+  forward_to = [loki.write.grafana_cloud.receiver]
+  labels = {
+    host = constants.hostname,
+  }
+}
+
+loki.write "grafana_cloud" {
+  endpoint {
+    url = {{ alloy_loki_url | string | to_json }}
+    basic_auth {
+      username = {{ alloy_loki_username | string | to_json }}
+      password = {{ alloy_loki_password | string | to_json }}
+    }
+  }
+}
+{% endif %}

@@ -1,0 +1,27 @@
+#!/usr/sbin/nft -f
+flush ruleset
+
+table inet homelab {
+  chain input {
+    type filter hook input priority filter; policy drop;
+    iifname "lo" accept
+    ct state established,related accept
+    ip protocol icmp accept
+    ip6 nexthdr ipv6-icmp accept
+{% for cidr in common_management_cidrs %}
+{% if ':' in cidr %}
+    ip6 saddr {{ cidr }} tcp dport {{ common_ssh_port }} accept
+{% else %}
+    ip saddr {{ cidr }} tcp dport {{ common_ssh_port }} accept
+{% endif %}
+{% endfor %}
+  }
+
+  chain forward {
+    type filter hook forward priority filter; policy drop;
+  }
+
+  chain output {
+    type filter hook output priority filter; policy accept;
+  }
+}

@@ -1,0 +1,39 @@
+# Version-control and controller state
+.git
+.gitignore
+.dockerignore
+.ansible
+*.retry
+
+# Host-specific inventory and every secrets document, including encrypted ones
+inventory/local.yml
+inventory/local.yaml
+secrets
+.sops.yaml
+
+# Credentials and environment files must never enter a build context
+**/.env
+**/.env.*
+**/*.key
+**/*.pem
+**/*.p12
+**/*.pfx
+**/age-identity*.txt
+**/known_hosts*
+
+# Local Compose customizations
+**/compose.override.yml
+**/compose.override.yaml
+**/docker-compose.override.yml
+**/docker-compose.override.yaml
+
+# Generated and local development artifacts
+**/__pycache__
+**/*.py[cod]
+**/*.log
+**/.DS_Store
+**/Thumbs.db
+**/.idea
+**/.vscode
+**/.tmp
+**/tmp

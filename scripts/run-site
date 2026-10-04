@@ -1,0 +1,13 @@
+#!/bin/sh
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$repo_dir/scripts/_controller-env"
+
+cd "$repo_dir"
+if [ -f "$grafana_secret" ]; then
+  SOPS_AGE_KEY_FILE=$age_identity sops exec-file --no-fifo "$grafana_secret" \
+    'scripts/ansible-playbook playbooks/site.yml --extra-vars "@{}"'
+else
+  exec scripts/ansible-playbook playbooks/site.yml
+fi

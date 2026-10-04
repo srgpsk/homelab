@@ -1,0 +1,12 @@
+---
+- name: Bootstrap the disposable Debian guest without SSH lockout
+  hosts: test_guests
+  gather_facts: true
+  become: false
+  vars:
+    common_ssh_hardening_enabled: false
+    common_ssh_key_access_verified: false
+    common_firewall_enabled: false
+    common_alloy_enabled: false
+  roles:
+    - common

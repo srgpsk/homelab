@@ -1,0 +1,53 @@
+#!/bin/sh
+set -eu
+
+repo_dir=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+. "$repo_dir/scripts/_controller-env"
+known_hosts=$state_dir/known_hosts
+host=${1:-}
+expected_fingerprint=${2:-}
+
+if [ -z "$host" ] || [ -z "$expected_fingerprint" ]; then
+  echo 'Usage: pin-host-key HOST SHA256:FINGERPRINT' >&2
+  echo 'Verify the fingerprint independently through the target console first.' >&2
+  exit 2
+fi
+
+mkdir -p "$state_dir"
+chmod 700 "$state_dir"
+scan_file=$(mktemp "$state_dir/host-scan.XXXXXX")
+updated_file=$(mktemp "$state_dir/known-hosts.XXXXXX")
+trap 'rm -f "$scan_file" "$updated_file" "$updated_file.old"' EXIT HUP INT TERM
+
+attempt=1
+while [ "$attempt" -le 3 ]; do
+  : >"$scan_file"
+  ssh-keyscan -T 5 -t ed25519 "$host" >"$scan_file" 2>/dev/null || true
+  [ -s "$scan_file" ] && break
+  attempt=$((attempt + 1))
+  sleep 1
+done
+
+if [ ! -s "$scan_file" ]; then
+  echo "Could not retrieve an ED25519 host key from $host after 3 attempts" >&2
+  exit 1
+fi
+
+observed_fingerprint=$(ssh-keygen -lf "$scan_file" | awk 'NR == 1 { print $2 }')
+
+if [ "$observed_fingerprint" != "$expected_fingerprint" ]; then
+  echo "Host-key mismatch for $host: expected $expected_fingerprint, observed $observed_fingerprint" >&2
+  exit 1
+fi
+
+if [ -f "$known_hosts" ]; then
+  cp "$known_hosts" "$updated_file"
+  ssh-keygen -R "$host" -f "$updated_file" >/dev/null 2>&1 || true
+  rm -f "$updated_file.old"
+fi
+cat "$scan_file" >>"$updated_file"
+chmod 600 "$updated_file"
+mv "$updated_file" "$known_hosts"
+trap - EXIT HUP INT TERM
+rm -f "$scan_file"
+echo "Pinned $host ED25519 host key: $observed_fingerprint"
